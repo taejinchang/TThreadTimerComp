@@ -58,12 +58,13 @@ end;
 
 constructor TInternalTimerThread.Create(AOwner: TThreadTimerComp);
 begin
-  // 초기화가 완료되기 전에 Execute가 실행되는 것을 막기 위해 Suspended 상태로 생성합니다.
-  inherited Create(True);
-  FreeOnTerminate := False;
+  // Execute에서 사용하는 필드를 먼저 초기화한 뒤 스레드를 시작합니다.
+  // XE2에서 Create(True) + Start 패턴은 EThread 예외를 발생시키므로,
+  // 필드를 먼저 설정하고 Create(False)로 바로 실행 상태로 생성합니다.
   FOwner := AOwner;
   FEvent := TEvent.Create(nil, False, False, '');
-  Start; // 초기화 완료 후 스레드를 시작합니다.
+  inherited Create(False);
+  FreeOnTerminate := False;
 end;
 
 destructor TInternalTimerThread.Destroy;
