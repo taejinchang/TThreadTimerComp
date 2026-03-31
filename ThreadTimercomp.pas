@@ -25,6 +25,7 @@ type
   TThreadTimerComp = class(TComponent)
   private
     FThread: TInternalTimerThread;
+    FLock: TCriticalSection;
     FEnabled: Boolean;
     FInterval: Cardinal;
     FOnTimer: TNotifyEvent;
@@ -57,10 +58,12 @@ end;
 
 constructor TInternalTimerThread.Create(AOwner: TThreadTimerComp);
 begin
-  inherited Create(False);
+  // 초기화가 완료되기 전에 Execute가 실행되는 것을 막기 위해 Suspended 상태로 생성합니다.
+  inherited Create(True);
   FreeOnTerminate := False;
   FOwner := AOwner;
   FEvent := TEvent.Create(nil, False, False, '');
+  Start; // 초기화 완료 후 스레드를 시작합니다.
 end;
 
 destructor TInternalTimerThread.Destroy;
@@ -80,6 +83,8 @@ end;
 procedure TInternalTimerThread.Execute;
 var
   WaitRes: TWaitResult;
+  LEnabled: Boolean;
+  LInterval: Cardinal;
 begin
   while not Terminated do
   begin
@@ -90,9 +95,18 @@ begin
       Continue;
     end;
 
-    if FOwner.FEnabled then
+    // 공유 필드를 락으로 보호하여 메인 스레드와의 데이터 경합을 방지합니다.
+    FOwner.FLock.Enter;
+    try
+      LEnabled := FOwner.FEnabled;
+      LInterval := FOwner.FInterval;
+    finally
+      FOwner.FLock.Leave;
+    end;
+
+    if LEnabled then
     begin
-      WaitRes := FEvent.WaitFor(FOwner.FInterval);
+      WaitRes := FEvent.WaitFor(LInterval);
       
       if Terminated then Break;
 
@@ -113,6 +127,7 @@ end;
 constructor TThreadTimerComp.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FLock := TCriticalSection.Create;
   FEnabled := False;
   FInterval := 1000;
   
@@ -124,26 +139,39 @@ destructor TThreadTimerComp.Destroy;
 begin
   // 내부 스레드를 먼저 안전하게 종료 및 해제합니다.
   FThread.Free;
+  FLock.Free;
   inherited Destroy;
 end;
 
 procedure TThreadTimerComp.SetEnabled(const Value: Boolean);
 begin
-  if FEnabled <> Value then
-  begin
-    FEnabled := Value;
-    if Assigned(FThread) then
-      FThread.WakeUp; // 상태가 바뀌면 스레드를 깨워 상황을 알립니다.
+  FLock.Enter;
+  try
+    if FEnabled <> Value then
+    begin
+      FEnabled := Value;
+      if Assigned(FThread) then
+        FThread.WakeUp; // 상태가 바뀌면 스레드를 깨워 상황을 알립니다.
+    end;
+  finally
+    FLock.Leave;
   end;
 end;
 
 procedure TThreadTimerComp.SetInterval(const Value: Cardinal);
 begin
-  if FInterval <> Value then
-  begin
-    FInterval := Value;
-    if FEnabled and Assigned(FThread) then
-      FThread.WakeUp;
+  FLock.Enter;
+  try
+    if Value = 0 then
+      raise EArgumentOutOfRangeException.Create('Interval must be greater than 0');
+    if FInterval <> Value then
+    begin
+      FInterval := Value;
+      if FEnabled and Assigned(FThread) then
+        FThread.WakeUp;
+    end;
+  finally
+    FLock.Leave;
   end;
 end;
 
