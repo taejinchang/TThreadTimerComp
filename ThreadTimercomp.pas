@@ -62,7 +62,13 @@ begin
   // XE2에서 Create(True) + Start 패턴은 EThread 예외를 발생시키므로,
   // 필드를 먼저 설정하고 Create(False)로 바로 실행 상태로 생성합니다.
   FOwner := AOwner;
-  FEvent := TEvent.Create(nil, False, False, '');
+  // 이름을 빈 문자열('')로 넘기면 Windows의 CreateEvent()가 이를 "이름 없는 이벤트"가
+  // 아니라 이름이 빈 문자열인 "명명된(named) 이벤트"로 처리합니다. 그 결과 폼/애플리케이션
+  // 안에 TThreadTimerComp 인스턴스가 여러 개 있으면 모든 내부 스레드가 동일한 커널 이벤트
+  // 핸들을 공유하게 되어, 한 인스턴스의 WakeUp이 다른 인스턴스를 깨우거나 신호를 가로채면서
+  // 일부 컴포넌트가 동작하지 않는 문제가 발생합니다. 인스턴스마다 고유한 이름을 부여하여
+  // 이름 충돌 및 이벤트 핸들 공유를 방지합니다.
+  FEvent := TEvent.Create(nil, False, False, GUIDToString(TGUID.NewGuid));
   inherited Create(False);
   FreeOnTerminate := False;
 end;
